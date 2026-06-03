@@ -88,4 +88,66 @@ exports.getUserCredits = async (req, res) => {
   } catch (error) {
     res.status(500).json({ msg: 'Error obteniendo créditos' });
   }
+  // Agregar esta función para manejar comprobantes
+exports.requestRechargeWithVoucher = async (req, res) => {
+  try {
+    const { packageId } = req.body;
+    const voucherPhoto = req.file;
+    const userId = req.user.id;
+    
+    const creditPackage = await CreditPackage.findById(packageId);
+    if (!creditPackage) {
+      return res.status(404).json({ msg: 'Paquete no encontrado' });
+    }
+    
+    // Guardar solicitud de recarga con comprobante
+    const rechargeRequest = {
+      userId,
+      packageId,
+      amount: creditPackage.priceCords,
+      credits: creditPackage.credits,
+      voucherPhoto: voucherPhoto ? bufferToBase64(voucherPhoto.buffer, voucherPhoto.mimetype) : null,
+      status: 'pending',
+      createdAt: new Date()
+    };
+    
+    await RechargeRequest.create(rechargeRequest);
+    
+    res.json({
+      success: true,
+      message: 'Comprobante enviado. En breve recibirás tus créditos.'
+    });
+  } catch (error) {
+    res.status(500).json({ msg: 'Error procesando recarga' });
+  }
+};
+
+// Admin: confirmar recarga
+exports.confirmRecharge = async (req, res) => {
+  try {
+    const { requestId } = req.body;
+    const request = await RechargeRequest.findById(requestId);
+    
+    if (!request || request.status !== 'pending') {
+      return res.status(404).json({ msg: 'Solicitud no encontrada' });
+    }
+    
+    const user = await User.findById(request.userId);
+    user.credits += request.credits;
+    
+    if (request.credits >= 200) {
+      user.isVIP = true;
+      user.vipExpires = new Date();
+      user.vipExpires.setDate(user.vipExpires.getDate() + 3);
+    }
+    
+    await user.save();
+    request.status = 'completed';
+    await request.save();
+    
+    res.json({ success: true, message: 'Créditos agregados' });
+  } catch (error) {
+    res.status(500).json({ msg: 'Error confirmando recarga' });
+  }
+};
 };
