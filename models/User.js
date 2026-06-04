@@ -5,7 +5,11 @@ const UserSchema = new mongoose.Schema({
   lastName: { type: String },
   phone: { type: String, unique: true, required: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['cliente', 'mandadito'], required: true },
+  role: { 
+    type: String, 
+    enum: ['cliente', 'mandadito', 'admin'], 
+    required: true 
+  },
   
   currentLocation: {
     lat: { type: Number, default: 12.1063 },
@@ -16,6 +20,9 @@ const UserSchema = new mongoose.Schema({
   locationEnabled: { type: Boolean, default: false },
   backgroundEnabled: { type: Boolean, default: false },
   termsAccepted: { type: Boolean, required: true },
+  
+  // Estado de cuenta
+  isActive: { type: Boolean, default: true },
   
   // Solo para mandaditos
   credits: { type: Number, default: 0 },
