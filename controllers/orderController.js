@@ -11,7 +11,10 @@ exports.createOrder = async (req, res) => {
       pickupLocation,
       deliveryLocation,
       isUrgentVIP = false,
-      businessId
+      businessId,
+      description,
+      isPublic = false,
+      mandaditoId
     } = req.body;
     
     const clientId = req.user.id;
@@ -26,14 +29,13 @@ exports.createOrder = async (req, res) => {
     }
     
     // Calcular subtotal
-    const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const subtotal = items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
     const total = subtotal + deliveryPrice;
     
     // Crear orden
-    const order = new Order({
+    const orderData = {
       client: clientId,
-      business: businessId,
-      items,
+      items: items || [],
       subtotal,
       deliveryPrice,
       total,
@@ -41,30 +43,28 @@ exports.createOrder = async (req, res) => {
       pickupLocation,
       deliveryLocation,
       distanceMeters: distance,
-      status: 'pendiente'
-    });
+      status: 'pendiente',
+      isPublic: isPublic || false
+    };
     
+    if (businessId) orderData.business = businessId;
+    if (description) orderData.description = description;
+    
+    const order = new Order(orderData);
     await order.save();
     
-    // Buscar mandaditos disponibles y notificarles
-    const availableMandaditos = await User.find({
-      role: 'mandadito',
-      isAvailable: true,
-      credits: { $gte: 5 } // Deben tener al menos 5 créditos
-    });
-    
-    // Notificar a los mandaditos (Socket.io se implementará después)
-    const io = req.app.get('io');
-    if (io) {
-      availableMandaditos.forEach(mandadito => {
-        io.to(`user_${mandadito._id}`).emit('new_order', {
-          orderId: order._id,
-          pickupLocation,
-          deliveryLocation,
-          total: order.total,
-          isUrgentVIP
-        });
-      });
+    // Si se asignó un mandadito específico
+    if (mandaditoId) {
+      const mandadito = await User.findById(mandaditoId);
+      if (mandadito && mandadito.role === 'mandadito' && mandadito.status === 'disponible') {
+        order.mandadito = mandaditoId;
+        order.status = 'aceptado';
+        await order.save();
+        
+        mandadito.credits -= 5;
+        mandadito.status = 'ocupado';
+        await mandadito.save();
+      }
     }
     
     res.status(201).json({
@@ -79,24 +79,40 @@ exports.createOrder = async (req, res) => {
   }
 };
 
+// Obtener pedidos disponibles para mandaditos (MANDADOS PÚBLICOS)
+exports.getAvailableOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({ 
+      status: 'pendiente',
+      mandadito: { $exists: false }
+    })
+    .populate('client', 'name phone')
+    .populate('business', 'name address')
+    .sort({ isUrgentVIP: -1, createdAt: -1 });
+    
+    console.log(`📦 ${orders.length} pedidos disponibles`);
+    res.json(orders);
+  } catch (error) {
+    console.error('Error en getAvailableOrders:', error);
+    res.status(500).json({ msg: 'Error al obtener pedidos disponibles' });
+  }
+};
+
 // Aceptar un pedido (mandadito)
 exports.acceptOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
     const mandaditoId = req.user.id;
     
-    // Verificar que el usuario es mandadito
     const mandadito = await User.findById(mandaditoId);
     if (mandadito.role !== 'mandadito') {
       return res.status(403).json({ msg: 'Solo los mandaditos pueden aceptar pedidos' });
     }
     
-    // Verificar créditos
     if (mandadito.credits < 5) {
-      return res.status(400).json({ msg: 'Créditos insuficientes. Recarga para aceptar mandados' });
+      return res.status(400).json({ msg: 'Créditos insuficientes' });
     }
     
-    // Buscar orden
     const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ msg: 'Pedido no encontrado' });
@@ -106,34 +122,18 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ msg: 'Este pedido ya no está disponible' });
     }
     
-    // Asignar mandadito y descontar créditos
     order.mandadito = mandaditoId;
     order.status = 'aceptado';
     await order.save();
     
-    // Descontar 5 créditos
     mandadito.credits -= 5;
+    mandadito.status = 'ocupado';
     await mandadito.save();
-    
-    // Notificar al cliente
-    const client = await User.findById(order.client);
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${order.client}`).emit('order_accepted', {
-        orderId: order._id,
-        mandadito: {
-          id: mandadito._id,
-          name: mandadito.name,
-          phone: mandadito.phone
-        }
-      });
-    }
     
     res.json({
       success: true,
       order,
-      remainingCredits: mandadito.credits,
-      message: 'Pedido aceptado exitosamente'
+      remainingCredits: mandadito.credits
     });
     
   } catch (error) {
@@ -152,7 +152,6 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(404).json({ msg: 'Pedido no encontrado' });
     }
     
-    // Verificar permisos (cliente o mandadito asignado)
     const isClient = order.client.toString() === req.user.id;
     const isMandadito = order.mandadito && order.mandadito.toString() === req.user.id;
     
@@ -160,28 +159,12 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(403).json({ msg: 'No autorizado' });
     }
     
-    // Actualizar estado
     order.status = status;
     if (photos) {
       order.deliveryPhotos.push(...photos);
     }
     
     await order.save();
-    
-    // Notificar cambios
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user_${order.client}`).emit('order_status_changed', {
-        orderId: order._id,
-        status: order.status
-      });
-      if (order.mandadito) {
-        io.to(`user_${order.mandadito}`).emit('order_status_changed', {
-          orderId: order._id,
-          status: order.status
-        });
-      }
-    }
     
     res.json({ success: true, order });
     
@@ -201,12 +184,10 @@ exports.rateOrder = async (req, res) => {
       return res.status(404).json({ msg: 'Pedido no encontrado' });
     }
     
-    // Verificar que es el cliente
     if (order.client.toString() !== req.user.id) {
       return res.status(403).json({ msg: 'No autorizado' });
     }
     
-    // Verificar que el pedido está entregado
     if (order.status !== 'entregado') {
       return res.status(400).json({ msg: 'Solo puedes calificar pedidos entregados' });
     }
@@ -245,5 +226,24 @@ exports.getUserOrders = async (req, res) => {
     
   } catch (error) {
     res.status(500).json({ msg: 'Error obteniendo pedidos' });
+  }
+};
+
+// Obtener un pedido por ID
+exports.getOrderById = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await Order.findById(orderId)
+      .populate('client', 'name phone')
+      .populate('mandadito', 'name phone')
+      .populate('business', 'name address');
+    
+    if (!order) {
+      return res.status(404).json({ msg: 'Pedido no encontrado' });
+    }
+    
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ msg: 'Error al obtener pedido' });
   }
 };

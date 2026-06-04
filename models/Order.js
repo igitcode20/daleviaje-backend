@@ -5,7 +5,6 @@ const OrderSchema = new mongoose.Schema({
   mandadito: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   business: { type: mongoose.Schema.Types.ObjectId, ref: 'Business' },
   
-  // Productos del pedido
   items: [{
     name: { type: String, required: true },
     price: { type: Number, required: true },
@@ -13,15 +12,15 @@ const OrderSchema = new mongoose.Schema({
     photo: { type: String }
   }],
   
-  // Totales
+  description: { type: String }, // 👈 Para mandados públicos
+  
   subtotal: { type: Number, required: true },
   deliveryPrice: { type: Number, required: true },
   total: { type: Number, required: true },
   
-  // Tipo de mandado
   isUrgentVIP: { type: Boolean, default: false },
+  isPublic: { type: Boolean, default: false }, // 👈 PARA MANDADOS PÚBLICOS
   
-  // Ubicaciones
   pickupLocation: {
     address: { type: String, required: true },
     lat: { type: Number, required: true },
@@ -36,18 +35,14 @@ const OrderSchema = new mongoose.Schema({
   
   distanceMeters: { type: Number },
   
-  // Estado del pedido
   status: { 
     type: String, 
     enum: ['pendiente', 'aceptado', 'recogido', 'enCamino', 'entregado', 'cancelado'],
     default: 'pendiente'
   },
   
-  // Calificación
   clientRating: { type: Number, min: 1, max: 5 },
   clientReview: { type: String },
-  
-  // Fotos del mandado
   deliveryPhotos: [{ type: String }],
   
   createdAt: { type: Date, default: Date.now }
