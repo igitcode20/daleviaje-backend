@@ -1,7 +1,6 @@
 const Order = require('../models/Order');
 const User = require('../models/User');
 const { getPriceByDistance, calculateDistance } = require('../services/distancePrice');
-const NotificationService = require('../services/notificationService');
 
 // Crear un pedido
 exports.createOrder = async (req, res) => {
@@ -19,20 +18,16 @@ exports.createOrder = async (req, res) => {
     
     const clientId = req.user.id;
     
-    // Calcular distancia
     const distance = await calculateDistance(pickupLocation, deliveryLocation);
     let deliveryPrice = getPriceByDistance(distance);
     
-    // Si es urgente VIP, precio fijo de 150
     if (isUrgentVIP) {
       deliveryPrice = 150;
     }
     
-    // Calcular subtotal
     const subtotal = items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
     const total = subtotal + deliveryPrice;
     
-    // Crear orden
     const orderData = {
       client: clientId,
       items: items || [],
@@ -53,25 +48,7 @@ exports.createOrder = async (req, res) => {
     const order = new Order(orderData);
     await order.save();
     
-    // Si se asignó un mandadito específico
-    if (mandaditoId) {
-      const mandadito = await User.findById(mandaditoId);
-      if (mandadito && mandadito.role === 'mandadito' && mandadito.status === 'disponible') {
-        order.mandadito = mandaditoId;
-        order.status = 'aceptado';
-        await order.save();
-        
-        mandadito.credits -= 5;
-        mandadito.status = 'ocupado';
-        await mandadito.save();
-      }
-    }
-    
-    res.status(201).json({
-      success: true,
-      order,
-      message: 'Pedido creado exitosamente'
-    });
+    res.status(201).json({ success: true, order });
     
   } catch (error) {
     console.error(error);
@@ -79,7 +56,7 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-// Obtener pedidos disponibles para mandaditos (MANDADOS PÚBLICOS)
+// Obtener pedidos disponibles para mandaditos
 exports.getAvailableOrders = async (req, res) => {
   try {
     const orders = await Order.find({ 
@@ -90,15 +67,13 @@ exports.getAvailableOrders = async (req, res) => {
     .populate('business', 'name address')
     .sort({ isUrgentVIP: -1, createdAt: -1 });
     
-    console.log(`📦 ${orders.length} pedidos disponibles`);
     res.json(orders);
   } catch (error) {
-    console.error('Error en getAvailableOrders:', error);
     res.status(500).json({ msg: 'Error al obtener pedidos disponibles' });
   }
 };
 
-// Aceptar un pedido (mandadito)
+// Aceptar un pedido (mandadito) - CON VALIDACIÓN DE CRÉDITOS
 exports.acceptOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -106,11 +81,16 @@ exports.acceptOrder = async (req, res) => {
     
     const mandadito = await User.findById(mandaditoId);
     if (mandadito.role !== 'mandadito') {
-      return res.status(403).json({ msg: 'Solo los mandaditos pueden aceptar pedidos' });
+      return res.status(403).json({ msg: 'No autorizado' });
     }
     
+    // VALIDACIÓN DE CRÉDITOS
     if (mandadito.credits < 5) {
-      return res.status(400).json({ msg: 'Créditos insuficientes' });
+      return res.status(400).json({ 
+        msg: 'No tienes suficientes créditos. Recarga para seguir aceptando mandados.',
+        credits: mandadito.credits,
+        needed: 5
+      });
     }
     
     const order = await Order.findById(orderId);
@@ -122,6 +102,7 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ msg: 'Este pedido ya no está disponible' });
     }
     
+    // ASIGNAR Y DESCONTAR CRÉDITOS
     order.mandadito = mandaditoId;
     order.status = 'aceptado';
     await order.save();
@@ -133,7 +114,8 @@ exports.acceptOrder = async (req, res) => {
     res.json({
       success: true,
       order,
-      remainingCredits: mandadito.credits
+      remainingCredits: mandadito.credits,
+      message: 'Pedido aceptado. Se te han descontado 5 créditos.'
     });
     
   } catch (error) {
@@ -145,7 +127,7 @@ exports.acceptOrder = async (req, res) => {
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, photos } = req.body;
+    const { status } = req.body;
     
     const order = await Order.findById(orderId);
     if (!order) {
@@ -160,46 +142,12 @@ exports.updateOrderStatus = async (req, res) => {
     }
     
     order.status = status;
-    if (photos) {
-      order.deliveryPhotos.push(...photos);
-    }
-    
     await order.save();
     
     res.json({ success: true, order });
     
   } catch (error) {
     res.status(500).json({ msg: 'Error actualizando estado' });
-  }
-};
-
-// Calificar pedido (cliente)
-exports.rateOrder = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { rating, review } = req.body;
-    
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ msg: 'Pedido no encontrado' });
-    }
-    
-    if (order.client.toString() !== req.user.id) {
-      return res.status(403).json({ msg: 'No autorizado' });
-    }
-    
-    if (order.status !== 'entregado') {
-      return res.status(400).json({ msg: 'Solo puedes calificar pedidos entregados' });
-    }
-    
-    order.clientRating = rating;
-    order.clientReview = review;
-    await order.save();
-    
-    res.json({ success: true, order });
-    
-  } catch (error) {
-    res.status(500).json({ msg: 'Error calificando pedido' });
   }
 };
 
@@ -223,7 +171,6 @@ exports.getUserOrders = async (req, res) => {
     }
     
     res.json(orders);
-    
   } catch (error) {
     res.status(500).json({ msg: 'Error obteniendo pedidos' });
   }
@@ -245,5 +192,34 @@ exports.getOrderById = async (req, res) => {
     res.json(order);
   } catch (error) {
     res.status(500).json({ msg: 'Error al obtener pedido' });
+  }
+};
+
+// Calificar pedido
+exports.rateOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { rating, review } = req.body;
+    
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ msg: 'Pedido no encontrado' });
+    }
+    
+    if (order.client.toString() !== req.user.id) {
+      return res.status(403).json({ msg: 'No autorizado' });
+    }
+    
+    if (order.status !== 'entregado') {
+      return res.status(400).json({ msg: 'Solo puedes calificar pedidos entregados' });
+    }
+    
+    order.clientRating = rating;
+    order.clientReview = review;
+    await order.save();
+    
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ msg: 'Error calificando pedido' });
   }
 };

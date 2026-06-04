@@ -12,14 +12,14 @@ const OrderSchema = new mongoose.Schema({
     photo: { type: String }
   }],
   
-  description: { type: String }, // 👈 Para mandados públicos
+  description: { type: String },
   
   subtotal: { type: Number, required: true },
   deliveryPrice: { type: Number, required: true },
   total: { type: Number, required: true },
   
   isUrgentVIP: { type: Boolean, default: false },
-  isPublic: { type: Boolean, default: false }, // 👈 PARA MANDADOS PÚBLICOS
+  isPublic: { type: Boolean, default: false },
   
   pickupLocation: {
     address: { type: String, required: true },
@@ -33,6 +33,13 @@ const OrderSchema = new mongoose.Schema({
     lng: { type: Number, required: true }
   },
   
+  // Ubicación en tiempo real del mandadito
+  mandaditoLocation: {
+    lat: { type: Number },
+    lng: { type: Number },
+    updatedAt: { type: Date }
+  },
+  
   distanceMeters: { type: Number },
   
   status: { 
@@ -40,6 +47,11 @@ const OrderSchema = new mongoose.Schema({
     enum: ['pendiente', 'aceptado', 'recogido', 'enCamino', 'entregado', 'cancelado'],
     default: 'pendiente'
   },
+  
+  // Para cancelaciones
+  cancelReason: { type: String },
+  cancelledBy: { type: String },
+  deliveredAt: { type: Date },
   
   clientRating: { type: Number, min: 1, max: 5 },
   clientReview: { type: String },
