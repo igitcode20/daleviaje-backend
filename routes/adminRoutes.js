@@ -14,6 +14,8 @@ router.get('/dashboard/stats', adminController.getDashboardStats);
 router.get('/users', adminController.getUsers);
 router.post('/users/:userId/credits', adminController.updateUserCredits);
 router.put('/users/:userId/status', adminController.toggleUserStatus);
+// 🎯 RUTA ENLAZADA: Ejecuta el borrado definitivo
+router.delete('/users/:userId', adminController.deleteUser); 
 
 // Pedidos
 router.get('/orders', adminController.getOrders);

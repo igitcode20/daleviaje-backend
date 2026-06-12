@@ -57,6 +57,23 @@ exports.toggleUserStatus = async (req, res) => {
   }
 };
 
+// 🎯 FUNCIÓN AGREGADA: Borrado definitivo de Clientes o Mandaditos
+exports.deleteUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findByIdAndDelete(userId);
+    
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
+    
+    res.json({ success: true, message: 'Usuario eliminado del sistema' });
+  } catch (error) {
+    console.error('Error deleteUser:', error);
+    res.status(500).json({ msg: 'Error al eliminar usuario' });
+  }
+};
+
 // ========== PEDIDOS ==========
 exports.getOrders = async (req, res) => {
   try {
@@ -178,7 +195,6 @@ exports.deleteBusiness = async (req, res) => {
 // ========== RECARGAS ==========
 exports.getRecharges = async (req, res) => {
   try {
-    // Buscar solicitudes de recarga (necesitas crear un modelo RechargeRequest)
     const RechargeRequest = require('../models/RechargeRequest');
     const recharges = await RechargeRequest.find({})
       .populate('userId', 'name lastName phone')
@@ -187,7 +203,6 @@ exports.getRecharges = async (req, res) => {
     res.json(recharges);
   } catch (error) {
     console.error('Error getRecharges:', error);
-    // Si no hay modelo, devolver array vacío
     res.json([]);
   }
 };
@@ -250,7 +265,6 @@ exports.getDashboardStats = async (req, res) => {
     const completedOrders = await Order.countDocuments({ status: 'entregado' });
     const totalBusinesses = await Business.countDocuments();
     
-    // Pedidos recientes
     const recentOrders = await Order.find({})
       .populate('client', 'name')
       .sort({ createdAt: -1 })
