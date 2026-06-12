@@ -2,7 +2,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const { getPriceByDistance, calculateDistance } = require('../services/distancePrice');
 
-// Crear un pedido
+// 🚀 CREAR UN PEDIDO (PÚBLICO O DIRECTO)
 exports.createOrder = async (req, res) => {
   try {
     const {
@@ -13,7 +13,7 @@ exports.createOrder = async (req, res) => {
       businessId,
       description,
       isPublic = false,
-      mandaditoId
+      driverId // <-- El frontend envía 'driverId' si es un Mandado Directo
     } = req.body;
     
     const clientId = req.user.id;
@@ -38,12 +38,21 @@ exports.createOrder = async (req, res) => {
       pickupLocation,
       deliveryLocation,
       distanceMeters: distance,
-      status: 'pendiente',
+      // Si el cliente seleccionó a un chofer directo, el estado nace como 'aceptado', si no, queda 'pendiente'
+      status: driverId ? 'aceptado' : 'pendiente', 
       isPublic: isPublic || false
     };
     
     if (businessId) orderData.business = businessId;
     if (description) orderData.description = description;
+    
+    // Si viene asignado a un repartidor directo, lo vinculamos de una vez
+    if (driverId) {
+      orderData.mandadito = driverId;
+      
+      // Opcional: Cambiamos el estado del repartidor a ocupado inmediatamente
+      await User.findByIdAndUpdate(driverId, { status: 'ocupado' });
+    }
     
     const order = new Order(orderData);
     await order.save();
@@ -51,12 +60,31 @@ exports.createOrder = async (req, res) => {
     res.status(201).json({ success: true, order });
     
   } catch (error) {
-    console.error(error);
+    console.error('Error creando pedido:', error);
     res.status(500).json({ msg: 'Error creando pedido', error: error.message });
   }
 };
 
-// Obtener pedidos disponibles para mandaditos
+// 🚀 OBTENER LISTA DE REPARTIDORES (El endpoint que te daba Error 500)
+exports.getAvailableDrivers = async (req, res) => {
+  try {
+    // Buscamos usuarios cuyo rol sea estrictamente 'mandadito' (según tu UserSchema) y que estén activos
+    const drivers = await User.find({ 
+      role: 'mandadito',
+      isActive: true 
+    }).select('-password -__v'); // Protegemos la contraseña del chofer
+
+    res.status(200).json(drivers);
+  } catch (error) {
+    console.error('Error en getAvailableDrivers:', error);
+    res.status(500).json({ 
+      msg: 'Error interno en el servidor al obtener mandaditos', 
+      error: error.message 
+    });
+  }
+};
+
+// Obtener pedidos disponibles generales (Mandados Públicos)
 exports.getAvailableOrders = async (req, res) => {
   try {
     const orders = await Order.find({ 
@@ -73,7 +101,7 @@ exports.getAvailableOrders = async (req, res) => {
   }
 };
 
-// Aceptar un pedido (mandadito) - CON VALIDACIÓN DE CRÉDITOS
+// Aceptar un pedido público (mandadito) - CON VALIDACIÓN DE CRÉDITOS
 exports.acceptOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
